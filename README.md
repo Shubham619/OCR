@@ -1,4 +1,31 @@
 # OCR
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("gpt2", output_attentions=True)
+tok = AutoTokenizer.from_pretrained("gpt2")
+
+text = "The Eiffel Tower is in Paris. Where is the Eiffel Tower located?"
+inputs = tok(text, return_tensors="pt")
+
+with torch.no_grad():
+    outputs = model(**inputs)
+    # attentions is a list: [layer1, layer2, ..., layerN]
+    # each layer: (batch, num_heads, seq_len, seq_len)
+    attentions = outputs.attentions  
+
+# Example: entropy per head in last layer
+import torch.nn.functional as F
+last_layer_attn = attentions[-1][0]  # shape: (num_heads, seq_len, seq_len)
+
+head_scores = []
+for h in range(last_layer_attn.size(0)):
+    probs = last_layer_attn[h]  # (seq_len, seq_len)
+    entropy = -(probs * (probs + 1e-9).log()).sum(-1).mean().item()
+    head_scores.append(entropy)
+
+print("Head importance (lower entropy = sharper focus, more important):")
+print(head_scores)
 # kv_cache_offloading.py
 import torch, psutil, time
 from concurrent.futures import ThreadPoolExecutor
@@ -147,12 +174,7 @@ def main():
     print(json.dumps({"baseline": base, "offloaded": offl}, indent=2))
 
 if __name__ == "__main__":
-    main()
-
-
-# patch_openllama.py
-import torch, transformers, inspect
-from offloaded_attention import OffloadedMHA
+    
 from kv_cache_offloading import DRAMKVCache
 
 def patch_openllama(model, cache):
