@@ -1,0 +1,56 @@
+
+⸻
+
+1. Mean Entropy (per head → averaged per layer)
+	•	What it is:
+For each attention distribution (softmax over keys), entropy measures how spread out the attention is.
+H(p) = -\sum_i p_i \log p_i
+	•	Interpretation:
+	•	Low entropy = distribution is sharp/peaky (the head strongly focuses on a few tokens).
+	•	High entropy = distribution is diffuse (the head attends weakly everywhere).
+	•	In the code: we averaged entropy across steps, tokens, and heads in a layer.
+
+⸻
+
+2. Focus
+	•	What it is:
+We normalize entropy to [0,1] and flip it:
+\text{Focus} = 1 - \frac{H}{\log(\text{seq\_len})}
+So it measures how focused attention is compared to a uniform distribution.
+	•	Interpretation:
+	•	High focus (~0.7–0.9) → the layer/head consistently attends to a few critical tokens (likely important, “hot”).
+	•	Low focus (~0.3–0.4) → the layer/head spreads its attention (less critical, “cold”).
+
+⸻
+
+3. Temporal Shift
+	•	What it is:
+Measures change in the location of attention peaks over time.
+For each new token generated, we look at where the max attention weight lies and see how much it shifts compared to the previous step.
+	•	Interpretation:
+	•	High temporal shift → the head is dynamically moving its attention target (tracking dependencies across the sequence).
+	•	Low temporal shift → the head always stares at the same place (e.g., last token, BOS).
+	•	Why useful: Heads that always stare at the same fixed token aren’t very informative → can be down-tiered.
+
+⸻
+
+4. Long-Range Rate
+	•	What it is:
+Fraction of timesteps where a layer’s attention goes beyond a cutoff window (say 256 tokens back).
+\text{LRrate} = \frac{\#\{\text{steps with peak position > cutoff}\}}{\text{total steps}}
+	•	Interpretation:
+	•	High LRrate = this layer often reaches far back into the context → critical for long dependencies, should stay in fast memory (GPU/DDR).
+	•	Low LRrate = mostly attends locally → can be safely offloaded or given smaller KV cache.
+
+⸻
+
+Combined in the code
+
+We combined them with weights like:
+\text{LayerScore} = 0.4 \cdot \text{focus} + 0.2 \cdot \text{temporal shift} + 0.2 \cdot \text{rep-change} + 0.2 \cdot \text{LRrate}
+	•	Focus tells us how “sharp” a layer is.
+	•	Temporal shift tells us how adaptive it is.
+	•	Rep-change (optional) tells us if hidden states evolve a lot across the layer.
+	•	Long-range rate tells us if it’s important for global memory.
+
+Together, these let us classify layers into HOT/WARM/COLD buckets for memory tiering
